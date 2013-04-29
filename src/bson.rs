@@ -93,55 +93,25 @@ impl BsonParser {
 
     // If we have zero elements (special case)
     if(size == 5) {
-      // return Document::new() as @Result;
       return @Document(@mut LinearMap::new());
     }
   
+    // Create a document
     let document = @Document(@mut LinearMap::new());
+    // Create a parser state
     let state = @mut ParserState {index: 4, size: size, document: document};
   
-    // Let's go, Match on the type
-    match data[state.index] as u8 {
-      0x02 => io::println("string"),
-      0x10 => BsonParser::parseInt32(state, data),
-      0x12 => BsonParser::parseInt64(state, data),
-      _ => io::println("unknown type")
+    while(state.index < state.size - 1) {
+      // Let's go, Match on the type
+      match data[state.index] as u8 {
+        0x02 => io::println("string"),
+        0x10 => BsonParser::parseInt32(state, data),
+        0x12 => BsonParser::parseInt64(state, data),
+        _ => io::println("unknown type")
+      }
     }
 
-// io::println("==================================");
-
-    // while state.index < 
-
-    // Decode the size of the total message
-    // let size : Option<i32> = i32::parse_bytes(vec::slice(data, 0, 4), 10u);
-
-    // let number_data = to_bytes(~"123");
-    // let number_data = vec::slice(data, 0, 4) as &i32;
-    // let number_data = ~[0x0c, 0, 0];
-    // let size = match i32::parse_bytes(number_data, 10u) {
-    //   Some(cn) => cn as int,
-    //   None => fail!(fmt!("internal error: parse_def_id: crate number \
-    //                            expected, but found %?", number_data))
-    // };
-
-    // let number_data = vec::slice(data, 0, 4);
-    // let size = number_data[0] as i32;
-
-    // io::println(fmt!("data :: %?", number_data));
-    // io::println(fmt!("size :: %?", size));
-    // io::println(fmt!("state :: %?", state));
-    // io::println(fmt!("length :: %?", data.len()));
-
-    // let error = @ParseError {error: false};
-    // let mut map = ~LinearMap::new();
-    // let mut document = ~Document {map: map};
-    // let element = ~Int32Element {number: 1};
-    // document.insert(~"hello", element as ~BsonElement);
-
-    // document.map.insert(~"hello", element as ~BsonElement);
-    // map.insert(~"hello", ~"world");
-    
-    // document as @Result
+    // return the document
     document
   }
 
@@ -163,9 +133,6 @@ impl BsonParser {
         Document(map) => map.insert(name, value),
         _ => false
       };
-
-      // // Save field in the document
-      // state.document.map.insert(name, value);
     }
   }
 
@@ -191,25 +158,55 @@ impl BsonParser {
   }
 }
 
-// #[test]
-// fn simple_int32_test() {  
-//   let parser:BsonParser = BsonParser;
-//   let result = parser.deserialize(@[0x0c, 0x00, 0x00, 0x00, 0x10, 0x61, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00]);
-//   io::println(fmt!("result :: %?", result.is_error()));
-// }
+#[test]
+fn simple_int32_test() {  
+  let parser:BsonParser = BsonParser;
+  let result = parser.deserialize(@[0x0c, 0x00, 0x00, 0x00, 0x10, 0x61, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00]);
+
+  fn process_map(map: @mut LinearMap<~str, ~BsonElement>) {
+    match map.find(&~"a") {
+      Some(&~Int32(number)) => assert_eq!(number, 1),
+      _ => ()
+    }
+  }
+
+  match result {
+    @Document(map) => process_map(map),
+    @ParseError(_) => ()
+  }
+}
 
 #[test]
-fn simple_int64_test() {  
+fn two_value_document_test() {  
   let parser:BsonParser = BsonParser;
-  let result = parser.deserialize(@[0x10, 0x00, 0x00, 0x00, 0x12, 0x61, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
-  // io::println(fmt!("result :: %?", result));
+  let result = parser.deserialize(@[0x17, 0x00, 0x00, 0x00, 0x12, 0x61, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x62, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00]);
 
-  io::println("++++++++++++++++++++++++++++++++++++++++++++++");
-  match result {
-    @Document(map) => io::println(fmt!("got document :: %?", map)),
-    @ParseError(result) => io::println(fmt!("got error :: %?", result))
+  fn process_map(map: @mut LinearMap<~str, ~BsonElement>) {
+    match map.find(&~"a") {
+      Some(&~Int64(number)) => assert_eq!(number, 2),
+      _ => ()
+    }
+
+    match map.find(&~"b") {
+      Some(&~Int32(number)) => assert_eq!(number, 1),
+      _ => ()
+    }
   }
-  // assert_eq!(false, result.is_error());
-  // Convert to a document
-  // let document = result as @Document;
+
+  match result {
+    @Document(map) => process_map(map),
+    @ParseError(_) => ()
+  }
 }
+
+// fn process_map(map: @mut LinearMap<~str, ~BsonElement>) {        
+//   for map.each_key |key| {
+//     let value = map.find(key);
+//     io::println(fmt!(" %?", value));
+    
+//     match map.find(key) {
+//       Some(&~Int64(number)) => assert_eq!(2, number),
+//       _ => io::println("found nothing"),
+//     }
+//   }
+// }
