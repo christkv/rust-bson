@@ -4,7 +4,7 @@ use core::str::from_bytes;
 use core::vec::const_slice;
 use core::cast::transmute;
 use core::vec::bytes::copy_memory;
-use core::vec::mut_slice;
+use core::vec::slice;
 
 // Available Result values
 enum Result {
@@ -32,21 +32,10 @@ struct ParserState {
 }
 
 impl BsonParser {
-  fn serialize(&self, object: &BsonElement) -> ~[u8] {
-    // Calculate size of final object
-    let size = BsonParser::calculateSize(object);
-    // Allocate a vector
-    let mut data:~[u8] = vec::from_elem(size, 0);
-    // Write the data to the vector
-    data[3] = ((size >> 24) & 0xff) as u8;
-    data[2] = ((size >> 16) & 0xff) as u8;
-    data[1] = ((size >> 8) & 0xff) as u8;
-    data[0] = (size & 0xff) as u8;
-    // Starting index
-    let mut index = 4;
-    // io::println(fmt!("==== vector :: %?", data));    
-
-    // Current index
+  fn serialize_object(&self, object: &BsonElement, data: &mut [u8], index: &mut uint) {
+    io::println(fmt!("+++++++++++ serialize_object :: %?", data));
+    // data.as_mut_buf()
+    // data[0] = 0x10;
     // Unpack the object
     match object {
       &Object(map) => {
@@ -58,39 +47,52 @@ impl BsonParser {
           match map.find(k) {
             Some(&~Int32(number)) => {
               // Set the data type
-              data[index] = BsonInt32 as u8;
+              data[*index] = BsonInt32 as u8;
               // Adjust index
-              index += 1;
+              *index += 1;
 
               // Copy the field value name to the vector
-              copy_memory(mut_slice(data, index, size), k.to_bytes(), k.len());
+              copy_memory(vec::mut_slice(data, *index, *index + k.len()), k.to_bytes(), k.len());
 
               // Adjust the index position
-              index += k.len() + 1;
+              *index += k.len() + 1;
 
               // io::println("========= INT32");
-              data[index + 3] = ((number >> 24) & 0xff) as u8;
-              data[index + 2] = ((number >> 16) & 0xff) as u8;
-              data[index + 1] = ((number >> 8) & 0xff) as u8;
-              data[index] = (number & 0xff) as u8;
-              index += 4;
+              data[*index + 3] = ((number >> 24) & 0xff) as u8;
+              data[*index + 2] = ((number >> 16) & 0xff) as u8;
+              data[*index + 1] = ((number >> 8) & 0xff) as u8;
+              data[*index] = (number & 0xff) as u8;
+              *index += 4;
             }
             _ => ()
           }
         }
-
-
-
-        // io::println(fmt!("==== vector :: %?", data));    
       }
       _ => ()
     }
-
-    data
   }
 
-  fn serialize_object(object: &BsonElement) {
+  fn serialize(&self, object: &BsonElement) -> ~[u8] {
+    // Calculate size of final object
+    let size = BsonParser::calculateSize(object);
+    // Allocate a vector
+    let mut data = vec::from_elem(size, 0);
+    // let mut data = @[0, ..20];
+    // // Write the data to the vector
+    data[3] = ((size >> 24) & 0xff) as u8;
+    data[2] = ((size >> 16) & 0xff) as u8;
+    data[1] = ((size >> 8) & 0xff) as u8;
+    data[0] = (size & 0xff) as u8;
+    // Starting index
+    let mut index = @mut 4;
+    io::println(fmt!("==== vector :: %?", data));    
 
+    // Current index
+    self.serialize_object(object, data, index);
+    io::println(fmt!("==== vector :: %?", data));    
+
+    // data
+    data
   }
 
   fn calculateSize(object: &BsonElement) -> uint {
@@ -262,29 +264,9 @@ fn simple_int32_serialize_test() {
   let object:~BsonElement = ~Object(map);
   // Serialize the object
   let data = parser.serialize(object);
-  // io::println(fmt!("================ data :: %?", data));
   let expectedData = ~[0x0c, 0x00, 0x00, 0x00, 0x10, 0x61, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00];
+  // Validate equality
   assert_eq!(data, expectedData);
-  // io::println(fmt!("================ data :: %?", expectedData));
-  // io::println(fmt!("================ data size :: %?", expectedData.len()));
-  // let o = parser.deserialize(data);
-
-  // let result = parser.deserialize(@[0x0c, 0x00, 0x00, 0x00, 0x10, 0x61, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00]);
-
-  // fn process_map(map: @mut LinearMap<~str, ~BsonElement>) {
-  //   match map.find(&~"a") {
-  //     Some(&~Int32(number)) => {
-  //       assert_eq!(number, 1);
-  //     },
-  //     _ => fail!()
-  //   }
-  // }
-
-  // match result {
-  //   @Document(~Object(map)) => process_map(map),
-  //   @Document(_) => (),
-  //   @ParseError(_) => ()
-  // }
 }
 
 #[test]
