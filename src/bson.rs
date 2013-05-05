@@ -6,9 +6,7 @@ use core::vec::const_slice;
 use core::cast::transmute;
 use core::vec::bytes::copy_memory;
 use std::treemap::TreeMap;
-
-// #[link(name = "std", vers = "0.6")];
-// TreeMap
+use std::dlist::DList;
 
 // Available Result values
 enum Result {
@@ -18,17 +16,45 @@ enum Result {
 
 // BsonTypes
 enum BsonTypes {
+  BsonDouble = 0x01,
+  BsonString = 0x02,
   BsonObject = 0x03,
+  BsonArray = 0x04,
+  BsonBinary = 0x05,
+  BsonObjectId = 0x07,
+  BsonBoolean = 0x08,
+  BsonDate = 0x09,
+  BsonNull = 0x0a,
+  BsonRegexp = 0x0b,
+  BsonJavascriptCode = 0x0d,
+  BsonSymbol = 0x0e,
+  BsonJavascriptCodeWScope = 0x0f,  
   BsonInt32 = 0x10,
-  BsonInt64 = 0x12
+  BsonTimestamp = 0x11,
+  BsonInt64 = 0x12,
+  BsonMinKey = 0xff,
+  BsonMaxKey = 0x7f
 }
 
 // Available Bson Element types
 enum BsonElement {
-  Int32(i32),
-  Int64(i64),
+  Double(f64),
   String(@str),
   Object(@mut TreeMap<~str, ~BsonElement>),
+  Array(@mut DList<~BsonElement>),  
+  Binary(@mut [u8], u8),
+  ObjectId(@mut [u8, ..12]),
+  Boolean(bool),
+  Date(u64),
+  Null,
+  RegExp(@str, @str),
+  JavascriptCode(@str),
+  Symbol(@str),
+  JavascriptCodeWScope(@str, ~BsonElement),  
+  Int32(i32),
+  Int64(i64),  
+  MinKey,
+  MaxKey
 }
 
 struct BsonParser;
@@ -311,12 +337,9 @@ fn simple_int32_test() {
 
 #[test]
 fn simple_embedded_doc_serialize_test() {    
-  // let treemap = @mut TreeMap::new::<int, int>();
-  // treemap.insert(5, 5);
-
-
   // {a:{b:1, c: mongodb.Long.fromNumber(2)}, d:3}
   let parser:BsonParser = BsonParser;
+
   // Build a BSON object
   let map_inner = @mut TreeMap::new::<~str, ~BsonElement>();
   map_inner.insert(~"c", ~Int64(2));
@@ -326,12 +349,11 @@ fn simple_embedded_doc_serialize_test() {
   map.insert(~"d", ~Int32(3));
   map.insert(~"a", ~Object(map_inner));
   let object = ~Object(map);
+
   // Serialize the object
-  // io::println(fmt!("======== object :: %?", object));
   let data = parser.serialize(object);
   let expectedData = ~[0x26, 0x00, 0x00, 0x00, 0x03, 0x61, 0x00, 0x17, 0x00, 0x00, 0x00, 0x10, 0x62, 0x00, 0x01, 0x00, 0x00, 0x00, 0x12, 0x63, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x64, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00];
-  // io::println(fmt!("== expectedData 1 :: %?", expectedData));
-  // io::println(fmt!("== data 2 ::         %?", data));
+
   // Validate equality
   assert_eq!(data, expectedData);
 }
