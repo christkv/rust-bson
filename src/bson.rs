@@ -1,10 +1,14 @@
-use core::hashmap::linear::LinearMap;
+extern mod std;
+
 use core::str::raw::from_c_str;
 use core::str::from_bytes;
 use core::vec::const_slice;
 use core::cast::transmute;
 use core::vec::bytes::copy_memory;
-use core::vec::slice;
+use std::treemap::TreeMap;
+
+// #[link(name = "std", vers = "0.6")];
+// TreeMap
 
 // Available Result values
 enum Result {
@@ -14,7 +18,9 @@ enum Result {
 
 // BsonTypes
 enum BsonTypes {
-  BsonInt32 = 0x10
+  BsonObject = 0x03,
+  BsonInt32 = 0x10,
+  BsonInt64 = 0x12
 }
 
 // Available Bson Element types
@@ -22,7 +28,7 @@ enum BsonElement {
   Int32(i32),
   Int64(i64),
   String(@str),
-  Object(@mut LinearMap<~str, ~BsonElement>),
+  Object(@mut TreeMap<~str, ~BsonElement>),
 }
 
 struct BsonParser;
@@ -33,14 +39,9 @@ struct ParserState {
 
 impl BsonParser {
   fn serialize_object(&self, object: &BsonElement, data: &mut [u8], index: &mut uint) {
-    io::println(fmt!("+++++++++++ serialize_object :: %?", data));
-    // data.as_mut_buf()
-    // data[0] = 0x10;
     // Unpack the object
     match object {
       &Object(map) => {
-        // io::println("deserialize Object");
-
         // Get each key
         for map.each_key |k| {
           // Let's figure out what type of object we have
@@ -57,12 +58,66 @@ impl BsonParser {
               // Adjust the index position
               *index += k.len() + 1;
 
-              // io::println("========= INT32");
+              // Write the int32 value to the data
               data[*index + 3] = ((number >> 24) & 0xff) as u8;
               data[*index + 2] = ((number >> 16) & 0xff) as u8;
               data[*index + 1] = ((number >> 8) & 0xff) as u8;
               data[*index] = (number & 0xff) as u8;
               *index += 4;
+            },
+            Some(&~Int64(number)) => {
+              // Set the data type
+              data[*index] = BsonInt64 as u8;
+              // Adjust index
+              *index += 1;
+
+              // Copy the field value name to the vector
+              copy_memory(vec::mut_slice(data, *index, *index + k.len()), k.to_bytes(), k.len());
+
+              // Adjust the index position
+              *index += k.len() + 1;
+
+              // Save the int64 number
+              data[*index + 7] = ((number >> 56) & 0xff) as u8;
+              data[*index + 6] = ((number >> 48) & 0xff) as u8;
+              data[*index + 5] = ((number >> 40) & 0xff) as u8;
+              data[*index + 4] = ((number >> 32) & 0xff) as u8;
+              data[*index + 3] = ((number >> 24) & 0xff) as u8;
+              data[*index + 2] = ((number >> 16) & 0xff) as u8;
+              data[*index + 1] = ((number >> 8) & 0xff) as u8;
+              data[*index] = (number & 0xff) as u8;
+              *index += 8;
+            },
+            Some(&~Object(map)) => {
+              // Set type
+              data[*index] = BsonObject as u8;
+              // Skip type
+              *index += 1;
+              // Copy the field value name to the vector
+              copy_memory(vec::mut_slice(data, *index, *index + k.len()), k.to_bytes(), k.len());
+
+              // Adjust the index position
+              *index += k.len() + 1;
+
+              // Save position for size calculation
+              let starting_index = *index;
+              // Skip to start of doc
+              *index += 4;
+
+              // Serialize the object
+              self.serialize_object(~Object(map), data, index);
+
+              // Calculate size
+              let size = *index - starting_index + 1;
+              // Write the size of the document
+              data[starting_index + 3] = ((size >> 24) & 0xff) as u8;
+              data[starting_index + 2] = ((size >> 16) & 0xff) as u8;
+              data[starting_index + 1] = ((size >> 8) & 0xff) as u8;
+              data[starting_index] = (size & 0xff) as u8;
+              // Adjust past the last 0
+              if *index < data.len() {                
+                *index += 1;
+              }
             }
             _ => ()
           }
@@ -75,21 +130,21 @@ impl BsonParser {
   fn serialize(&self, object: &BsonElement) -> ~[u8] {
     // Calculate size of final object
     let size = BsonParser::calculateSize(object);
+    
     // Allocate a vector
     let mut data = vec::from_elem(size, 0);
-    // let mut data = @[0, ..20];
-    // // Write the data to the vector
+
+    // Write the data to the vector
     data[3] = ((size >> 24) & 0xff) as u8;
     data[2] = ((size >> 16) & 0xff) as u8;
     data[1] = ((size >> 8) & 0xff) as u8;
     data[0] = (size & 0xff) as u8;
+
     // Starting index
     let mut index = @mut 4;
-    io::println(fmt!("==== vector :: %?", data));    
 
-    // Current index
+    // Serialize the object
     self.serialize_object(object, data, index);
-    io::println(fmt!("==== vector :: %?", data));    
 
     // data
     data
@@ -110,6 +165,7 @@ impl BsonParser {
           // Match the key
           size += match map.find(k) {
             Some(&~Int32(_)) => 4,
+            Some(&~Object(map)) => BsonParser::calculateSize(~Object(map)),
             Some(&~Int64(_)) => 8,
             _ => 0
           };
@@ -132,7 +188,7 @@ impl BsonParser {
 
     // If we have zero elements (special case)
     if(size == 5) {
-      return @Document(~Object(@mut LinearMap::new()));
+      return @Document(~Object(@mut TreeMap::new::<~str, ~BsonElement>()));
     }
 
     // Parse the document
@@ -143,9 +199,7 @@ impl BsonParser {
 
   fn deserialize_loop(data: &[u8], index: &mut i64) -> ~BsonElement {  
     // Create an empty object
-    let object: ~BsonElement = ~Object(@mut LinearMap::new());
-    // Decode the document size
-    let size = data[*index] as u32;
+    let object: ~BsonElement = ~Object(@mut TreeMap::new::<~str, ~BsonElement>());
     // Adjust the location of the index
     *index = *index + 4;
     // Loop until we are done
@@ -239,7 +293,7 @@ fn simple_int32_test() {
   let parser:BsonParser = BsonParser;
   let result = parser.deserialize(@[0x0c, 0x00, 0x00, 0x00, 0x10, 0x61, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00]);
 
-  fn process_map(map: @mut LinearMap<~str, ~BsonElement>) {
+  fn process_map(map: @mut TreeMap<~str, ~BsonElement>) {
     match map.find(&~"a") {
       Some(&~Int32(number)) => {
         assert_eq!(number, 1);
@@ -256,10 +310,38 @@ fn simple_int32_test() {
 }
 
 #[test]
+fn simple_embedded_doc_serialize_test() {    
+  // let treemap = @mut TreeMap::new::<int, int>();
+  // treemap.insert(5, 5);
+
+
+  // {a:{b:1, c: mongodb.Long.fromNumber(2)}, d:3}
+  let parser:BsonParser = BsonParser;
+  // Build a BSON object
+  let map_inner = @mut TreeMap::new::<~str, ~BsonElement>();
+  map_inner.insert(~"c", ~Int64(2));
+  map_inner.insert(~"b", ~Int32(1));
+
+  let map = @mut TreeMap::new::<~str, ~BsonElement>();
+  map.insert(~"d", ~Int32(3));
+  map.insert(~"a", ~Object(map_inner));
+  let object = ~Object(map);
+  // Serialize the object
+  // io::println(fmt!("======== object :: %?", object));
+  let data = parser.serialize(object);
+  let expectedData = ~[0x26, 0x00, 0x00, 0x00, 0x03, 0x61, 0x00, 0x17, 0x00, 0x00, 0x00, 0x10, 0x62, 0x00, 0x01, 0x00, 0x00, 0x00, 0x12, 0x63, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x64, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00];
+  // io::println(fmt!("== expectedData 1 :: %?", expectedData));
+  // io::println(fmt!("== data 2 ::         %?", data));
+  // Validate equality
+  assert_eq!(data, expectedData);
+}
+
+
+#[test]
 fn simple_int32_serialize_test() {    
   let parser:BsonParser = BsonParser;
   // Build a BSON object
-  let map = @mut LinearMap::new();
+  let map = @mut TreeMap::new::<~str, ~BsonElement>();
   map.insert(~"a", ~Int32(1));
   let object:~BsonElement = ~Object(map);
   // Serialize the object
@@ -274,7 +356,7 @@ fn simple_string_test() {
   let parser:BsonParser = BsonParser;
   let result = parser.deserialize(@[0x18, 0x00, 0x00, 0x00, 0x02, 0x61, 0x00, 0x0c, 0x00, 0x00, 0x00, 0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x20, 0x77, 0x6f, 0x72, 0x6c, 0x64, 0x00, 0x00]);
 
-  fn process_map(map: @mut LinearMap<~str, ~BsonElement>) {
+  fn process_map(map: @mut TreeMap<~str, ~BsonElement>) {
     match map.find(&~"a") {
       Some(&~String(final)) => {
         assert_eq!(final, @"hello world");
@@ -295,7 +377,7 @@ fn simple_int64_test() {
   let parser:BsonParser = BsonParser;
   let result = parser.deserialize(@[0x10, 0x00, 0x00, 0x00, 0x12, 0x61, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
 
-  fn process_map(map: @mut LinearMap<~str, ~BsonElement>) {
+  fn process_map(map: @mut TreeMap<~str, ~BsonElement>) {
     match map.find(&~"a") {
       Some(&~Int64(number)) => {
         assert_eq!(number, 2);
@@ -316,7 +398,7 @@ fn two_value_document_test() {
   let parser:BsonParser = BsonParser;
   let result = parser.deserialize(@[0x17, 0x00, 0x00, 0x00, 0x12, 0x61, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x62, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00]);
 
-  fn process_map(map: @mut LinearMap<~str, ~BsonElement>) {
+  fn process_map(map: @mut TreeMap<~str, ~BsonElement>) {
     match map.find(&~"a") {
       Some(&~Int64(number)) => assert_eq!(number, 2),
       _ => ()
@@ -342,7 +424,7 @@ fn sub_document_test() {
   let result = parser.deserialize(@[0x1b, 0x00, 0x00, 0x00, 0x03, 0x61, 0x00, 0x0c, 0x00, 0x00, 0x00, 0x10, 0x62, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x10, 0x63, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00]);
 
   // Validate the result
-  fn process_map(map: @mut LinearMap<~str, ~BsonElement>) {
+  fn process_map(map: @mut TreeMap<~str, ~BsonElement>) {
     match map.find(&~"a") {
       Some(&~Object(object_map)) => {
 
