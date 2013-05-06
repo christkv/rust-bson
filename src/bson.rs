@@ -257,21 +257,25 @@ impl BsonParser {
 
       // Match bson type
       match bson_type as u8 {
-        0x02 => {
-            map.insert(name, BsonParser::parseString(index, data));
-          },
-        0x03 => {
-            map.insert(name, BsonParser::deserialize_loop(data, index));
-          }
-        0x04 => {
-            map.insert(name, BsonParser::deserialize_array(data, index));
-          },
-        0x10 => {
-            map.insert(name, BsonParser::parseInt32(index, data));
-          },
-        0x12 => {
-            map.insert(name, BsonParser::parseInt64(index, data));
-          },
+        0x01 => { map.insert(name, BsonParser::parseDouble(index, data)); },
+        0x02 => { map.insert(name, BsonParser::parseString(index, data)); },
+        0x03 => { map.insert(name, BsonParser::deserialize_loop(data, index)); },
+        0x04 => { map.insert(name, BsonParser::deserialize_array(data, index)); },
+        0x05 => { map.insert(name, BsonParser::parseBinary(index, data)); },
+        0x06 => { map.insert(name, ~Undefined); },
+        0x07 => { map.insert(name, BsonParser::parseObjectId(index, data)); },
+        0x08 => { map.insert(name, BsonParser::parseBoolean(index, data)); },
+        0x09 => { map.insert(name, BsonParser::parseDateTime(index, data)); },
+        0x0a => { map.insert(name, ~Null); },
+        0x0b => { map.insert(name, BsonParser::parseRegExp(index, data)); },
+        0x0d => { map.insert(name, BsonParser::parseJavaScriptCode(index, data)); },
+        0x0e => { map.insert(name, BsonParser::parseSymbol(index, data)); },
+        0x0f => { map.insert(name, BsonParser::parseJavaScriptCodeWScope(index, data)); },
+        0x10 => { map.insert(name, BsonParser::parseInt32(index, data)); },
+        0x11 => { map.insert(name, BsonParser::parseTimestamp(index, data)); },
+        0x12 => { map.insert(name, BsonParser::parseInt64(index, data)); },
+        0xff => { map.insert(name, ~MinKey); },
+        0x7f => { map.insert(name, ~MaxKey); },
         _ => ()
       }
 
@@ -310,63 +314,25 @@ impl BsonParser {
 
       // Match bson type
       match bson_type as u8 {
-        0x01 => {
-            list.push(BsonParser::parseDouble(index, data));
-          },
-        0x02 => {
-            list.push(BsonParser::parseString(index, data));
-          },
-        0x03 => {
-            list.push(BsonParser::deserialize_loop(data, index));
-          }
-        0x04 => {
-            list.push(BsonParser::deserialize_array(data, index));
-          },
-        0x05 => {
-            list.push(BsonParser::parseBinary(index, data));
-          },
-        0x06 => {
-            list.push(~Undefined);
-          },
-        0x07 => {
-            list.push(BsonParser::parseObjectId(index, data));
-          },
-        0x08 => {
-            list.push(BsonParser::parseBoolean(index, data));
-          },
-        0x09 => {
-            list.push(BsonParser::parseDateTime(index, data));
-          },
-        0x0a => {
-            list.push(~Null);
-          },
-        0x0b => {
-            list.push(BsonParser::parseRegExp(index, data));
-          },
-        0x0d => {
-            list.push(BsonParser::parseJavaScriptCode(index, data));
-          },
-        0x0e => {
-            list.push(BsonParser::parseSymbol(index, data));
-          },
-        0x0f => {
-            list.push(BsonParser::parseJavaScriptCodeWScope(index, data));
-          },
-        0x10 => {
-            list.push(BsonParser::parseInt32(index, data));
-          },
-        0x11 => {
-            list.push(BsonParser::parseTimestamp(index, data));
-          },
-        0x12 => {
-            list.push(BsonParser::parseInt64(index, data));
-          },
-        0xff => {
-            list.push(~MinKey);
-          },
-        0x7f => {
-            list.push(~MaxKey);
-          },
+        0x01 => list.push(BsonParser::parseDouble(index, data)),
+        0x02 => list.push(BsonParser::parseString(index, data)),
+        0x03 => list.push(BsonParser::deserialize_loop(data, index)),
+        0x04 => list.push(BsonParser::deserialize_array(data, index)),
+        0x05 => list.push(BsonParser::parseBinary(index, data)),
+        0x06 => list.push(~Undefined),
+        0x07 => list.push(BsonParser::parseObjectId(index, data)),
+        0x08 => list.push(BsonParser::parseBoolean(index, data)),
+        0x09 => list.push(BsonParser::parseDateTime(index, data)),
+        0x0a => list.push(~Null),
+        0x0b => list.push(BsonParser::parseRegExp(index, data)),
+        0x0d => list.push(BsonParser::parseJavaScriptCode(index, data)),
+        0x0e => list.push(BsonParser::parseSymbol(index, data)),
+        0x0f => list.push(BsonParser::parseJavaScriptCodeWScope(index, data)),
+        0x10 => list.push(BsonParser::parseInt32(index, data)),
+        0x11 => list.push(BsonParser::parseTimestamp(index, data)),
+        0x12 => list.push(BsonParser::parseInt64(index, data)),
+        0xff => list.push(~MinKey),
+        0x7f => list.push(~MaxKey),
         _ => ()
       }      
     }
