@@ -122,74 +122,32 @@ pub impl Decoder {
       if bson_type == 0 || bson_type == 255 {
         break;
       }
+      
       // Decode the name from the cstring
       let name = self.reader.read_c_str();
-      io::println(fmt!(" + deserialize %? :: of type %?", name, bson_type));
+      // io::println(fmt!(" + deserialize %? :: of type %?", name, bson_type));
+      
       // Match on the type
       match bson_type {
-        0x01 => { 
-          // Read u64 value
-          let u64_value = self.reader.read_le_u64();
-          // Cast to f64
-          let value = to_double(u64_value);
-          // Insert value
-          map.insert(name, ~Double(value));      
-        },
-        0x02 => { 
-          let string_size = self.reader.read_le_u32();
-          let bytes = self.reader.read_bytes(string_size as uint);
-          map.insert(name, ~String(from_bytes(bytes))); 
-        },
-        0x03 => { 
-          map.insert(name, self.parse_object()); 
-        },
+        0x01 => { map.insert(name, self.parse_double()); },
+        0x02 => { map.insert(name, self.parse_string()); },
+        0x03 => { map.insert(name, self.parse_object()); },
         0x04 => { 
           match self.parse_object() {
-            ~Object(map) => {
-              map.insert(name, ~Array(map));
-            },
+            ~Object(map) => { map.insert(name, ~Array(map)); },
             _ => ()
           }
         },
-        0x05 => { 
-          let binary_size = self.reader.read_le_u32();
-          let sub_type = self.reader.read_u8();
-          let bytes = self.reader.read_bytes(binary_size as uint);
-          map.insert(name, ~Binary(bytes, sub_type)); 
-        },
+        0x05 => {  map.insert(name, self.parse_binary()); },
         0x06 => { map.insert(name, ~Undefined); },
         0x07 => { map.insert(name, ~ObjectId(self.reader.read_bytes(12))); },
-        0x08 => { 
-          let boolValue = self.reader.read_u8();
-          if boolValue == 0 {
-            map.insert(name, ~Boolean(false)); 
-          } else {
-            map.insert(name, ~Boolean(true)); 
-          }
-        },
+        0x08 => { map.insert(name, self.parse_bool()); },
         0x09 => { map.insert(name, ~DateTime(self.reader.read_le_u64())); },
         0x0a => { map.insert(name, ~Null); },
-        0x0b => { 
-          let reg_exp = self.reader.read_c_str();
-          let options = self.reader.read_c_str();
-          map.insert(name, ~RegExp(reg_exp, options)); 
-        },
-        0x0d => { 
-          let string_size = self.reader.read_le_u32();
-          let bytes = self.reader.read_bytes(string_size as uint);
-          map.insert(name, ~JavascriptCode(from_bytes(bytes))); 
-        },
-        0x0e => { 
-          let string_size = self.reader.read_le_u32();
-          let bytes = self.reader.read_bytes(string_size as uint);
-          map.insert(name, ~Symbol(from_bytes(bytes))); 
-        },
-        0x0f => { 
-          let string_size = self.reader.read_le_u32();
-          let bytes = self.reader.read_bytes(string_size as uint);
-          let document = self.parse_object();
-          map.insert(name, ~JavascriptCodeWScope(from_bytes(bytes), document)); 
-        },
+        0x0b => { map.insert(name, self.parse_regexp()); },
+        0x0d => { map.insert(name, self.parse_javascript()); },
+        0x0e => { map.insert(name, self.parse_symbol()); },
+        0x0f => { map.insert(name, self.parse_javascript_w_scope()); },
         0x10 => { map.insert(name, ~Int32(self.reader.read_le_i32())); },
         0x11 => { map.insert(name, ~Timestamp(self.reader.read_le_u64())); },
         0x12 => { map.insert(name, ~Int64(self.reader.read_le_i64())); },
@@ -200,6 +158,70 @@ pub impl Decoder {
     }
 
     ~Object(map)
+  }
+
+  #[inline(always)]
+  priv fn parse_double(&self) -> ~BsonElement {
+    // Read u64 value
+    let u64_value = self.reader.read_le_u64();
+    // Cast to f64
+    let value = to_double(u64_value);
+    // Insert value
+    ~Double(value)
+  }
+
+  #[inline(always)]
+  priv fn parse_string(&self) -> ~BsonElement {
+    let string_size = self.reader.read_le_u32();
+    let bytes = self.reader.read_bytes(string_size as uint);
+    ~String(from_bytes(bytes))
+  }
+
+  #[inline(always)]
+  priv fn parse_binary(&self) -> ~BsonElement {
+    let binary_size = self.reader.read_le_u32();
+    let sub_type = self.reader.read_u8();
+    let bytes = self.reader.read_bytes(binary_size as uint);
+    ~Binary(bytes, sub_type)
+  }
+
+  #[inline(always)]
+  priv fn parse_bool(&self) -> ~BsonElement {
+    let boolValue = self.reader.read_u8();
+    if boolValue == 0 {
+      ~Boolean(false)
+    } else {
+      ~Boolean(true)
+    }
+  }
+
+  #[inline(always)]
+  priv fn parse_regexp(&self) -> ~BsonElement {
+    let reg_exp = self.reader.read_c_str();
+    let options = self.reader.read_c_str();
+    ~RegExp(reg_exp, options) 
+  }
+
+  #[inline(always)]
+  priv fn parse_symbol(&self) -> ~BsonElement {
+    let string_size = self.reader.read_le_u32();
+    let bytes = self.reader.read_bytes(string_size as uint);
+    ~Symbol(from_bytes(bytes))
+  }
+
+  #[inline(always)]
+  priv fn parse_javascript_w_scope(&self) -> ~BsonElement {
+    let string_size = self.reader.read_le_u32();
+    let bytes = self.reader.read_bytes(string_size as uint);
+    let document = self.parse_object();
+    ~JavascriptCodeWScope(from_bytes(bytes), document) 
+  }
+
+  #[inline(always)]
+  priv fn parse_javascript(&self) -> ~BsonElement {
+    let string_size = self.reader.read_le_u32();
+    let bytes = self.reader.read_bytes(string_size as uint);
+    ~JavascriptCode(from_bytes(bytes))
   }
 
   fn parse(&self) -> ~BsonElement {
