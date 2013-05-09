@@ -4,16 +4,11 @@
 #[crate_type = "lib"];
 extern mod std;
 
-// use core::str::raw::from_c_str;
 use core::str::from_bytes;
-// use core::vec::const_slice;
-// use core::vec::slice;
-// use core::cast::transmute;
-// use core::vec::bytes::copy_memory;
 use std::treemap::TreeMap;
+// use
 
 use core::io::{WriterUtil,ReaderUtil};
-use std::serialize;
 
 // Available Result values
 enum Result {
@@ -44,37 +39,28 @@ enum BsonTypes {
   BsonMaxKey = 0x7f
 }
 
-// // Type used to wrap array item
-// struct ArrayItem {
-//   item: ~BsonElement
-// }
-
 // Available Bson Element types
 enum BsonElement {
   Double(f64),
-  String(~str),
-  Object(@mut TreeMap<~str, ~BsonElement>),
-  Array(@mut TreeMap<~str, ~BsonElement>),  
+  String(@str),
+  Object(@mut TreeMap<~str, @BsonElement>),
+  Array(~[@BsonElement]),  
   Binary(~[u8], u8),
   Undefined,
   ObjectId(~[u8]),
   Boolean(bool),
   DateTime(u64),
   Null,
-  RegExp(~str, ~str),
+  RegExp(@str, @str),
   JavascriptCode(~str),
   Symbol(~str),
-  JavascriptCodeWScope(~str, ~BsonElement),  
+  JavascriptCodeWScope(~str, @BsonElement),  
   Int32(i32),
   Timestamp(u64),
   Int64(i64),  
   MinKey,
   MaxKey
 }
-
-// pub struct Encoder {
-//   writer: @io::Writer
-// }
 
 /*
  * Utility methods
@@ -97,22 +83,11 @@ pub impl Decoder {
     }
   }
 
-  // fn extract_string(index:i64, data: &[u8]) -> ~str {
-  //   unsafe {
-  //     let data2: &[i8] = transmute(data);
-  //     // Unpack the name of the field
-  //     from_c_str(&data2[index])
-  //   }
-  // }
-
-  // BsonObject = 0x03,
-  // BsonArray = 0x04,
-
-  priv fn parse_object(&self) -> ~BsonElement {
+  priv fn parse_object(&self) ->@BsonElement {
     // Read object size
     self.reader.read_le_u32();
     // Store all the values of the object in order
-    let map = @mut TreeMap::new::<~str, ~BsonElement>();
+    let map = @mut TreeMap::new::<~str, @BsonElement>();
 
     // Loop over all items in the object
     loop {
@@ -125,7 +100,6 @@ pub impl Decoder {
       
       // Decode the name from the cstring
       let name = self.reader.read_c_str();
-      // io::println(fmt!(" + deserialize %? :: of type %?", name, bson_type));
       
       // Match on the type
       match bson_type {
@@ -134,97 +108,113 @@ pub impl Decoder {
         0x03 => { map.insert(name, self.parse_object()); },
         0x04 => { 
           match self.parse_object() {
-            ~Object(map) => { map.insert(name, ~Array(map)); },
+            @Object(map) => { 
+              // Create a vector based on the results
+              let mut values = vec::from_elem(map.len(), @Null);
+              let mut index = 0;
+              // Map all tree values
+              for map.each_value |value| {
+                values[index] = *value;
+                index += 1;
+              }
+              // Insert the array
+              map.insert(name, @Array(values)); 
+            },
             _ => ()
           }
         },
         0x05 => {  map.insert(name, self.parse_binary()); },
-        0x06 => { map.insert(name, ~Undefined); },
-        0x07 => { map.insert(name, ~ObjectId(self.reader.read_bytes(12))); },
+        0x06 => { map.insert(name, @Undefined); },
+        0x07 => { map.insert(name, @ObjectId(self.reader.read_bytes(12))); },
         0x08 => { map.insert(name, self.parse_bool()); },
-        0x09 => { map.insert(name, ~DateTime(self.reader.read_le_u64())); },
-        0x0a => { map.insert(name, ~Null); },
+        0x09 => { map.insert(name, @DateTime(self.reader.read_le_u64())); },
+        0x0a => { map.insert(name, @Null); },
         0x0b => { map.insert(name, self.parse_regexp()); },
         0x0d => { map.insert(name, self.parse_javascript()); },
         0x0e => { map.insert(name, self.parse_symbol()); },
         0x0f => { map.insert(name, self.parse_javascript_w_scope()); },
-        0x10 => { map.insert(name, ~Int32(self.reader.read_le_i32())); },
-        0x11 => { map.insert(name, ~Timestamp(self.reader.read_le_u64())); },
-        0x12 => { map.insert(name, ~Int64(self.reader.read_le_i64())); },
-        0xff => { map.insert(name, ~MinKey); },
-        0x7f => { map.insert(name, ~MaxKey); },
+        0x10 => { map.insert(name, @Int32(self.reader.read_le_i32())); },
+        0x11 => { map.insert(name, @Timestamp(self.reader.read_le_u64())); },
+        0x12 => { map.insert(name, @Int64(self.reader.read_le_i64())); },
+        0xff => { map.insert(name, @MinKey); },
+        0x7f => { map.insert(name, @MaxKey); },
         _ => fail!(~"Invalid bson type")
       }      
     }
 
-    ~Object(map)
+    @Object(map)
   }
 
   #[inline(always)]
-  priv fn parse_double(&self) -> ~BsonElement {
+  priv fn parse_double(&self) -> @BsonElement {
     // Read u64 value
     let u64_value = self.reader.read_le_u64();
     // Cast to f64
     let value = to_double(u64_value);
     // Insert value
-    ~Double(value)
+    @Double(value)
   }
 
   #[inline(always)]
-  priv fn parse_string(&self) -> ~BsonElement {
-    let string_size = self.reader.read_le_u32();
+  priv fn parse_string(&self) -> @BsonElement {
+    let string_size = self.reader.read_le_u32() - 1;
     let bytes = self.reader.read_bytes(string_size as uint);
-    ~String(from_bytes(bytes))
+    // Skip zero
+    self.reader.read_u8();
+    // Convert bytes
+    let string = from_bytes(bytes);
+    // @String(from_bytes(bytes))
+    @String(string.to_managed())
   }
 
   #[inline(always)]
-  priv fn parse_binary(&self) -> ~BsonElement {
+  priv fn parse_binary(&self) -> @BsonElement {
     let binary_size = self.reader.read_le_u32();
     let sub_type = self.reader.read_u8();
     let bytes = self.reader.read_bytes(binary_size as uint);
-    ~Binary(bytes, sub_type)
+    @Binary(bytes, sub_type)
   }
 
   #[inline(always)]
-  priv fn parse_bool(&self) -> ~BsonElement {
+  priv fn parse_bool(&self) -> @BsonElement {
     let boolValue = self.reader.read_u8();
     if boolValue == 0 {
-      ~Boolean(false)
+      @Boolean(false)
     } else {
-      ~Boolean(true)
+      @Boolean(true)
     }
   }
 
   #[inline(always)]
-  priv fn parse_regexp(&self) -> ~BsonElement {
+  priv fn parse_regexp(&self) -> @BsonElement {
     let reg_exp = self.reader.read_c_str();
     let options = self.reader.read_c_str();
-    ~RegExp(reg_exp, options) 
+    @RegExp(reg_exp.to_managed(), options.to_managed()) 
   }
 
   #[inline(always)]
-  priv fn parse_symbol(&self) -> ~BsonElement {
+  priv fn parse_symbol(&self) -> @BsonElement {
     let string_size = self.reader.read_le_u32();
     let bytes = self.reader.read_bytes(string_size as uint);
-    ~Symbol(from_bytes(bytes))
+    @Symbol(from_bytes(bytes))
   }
 
   #[inline(always)]
-  priv fn parse_javascript_w_scope(&self) -> ~BsonElement {
+  priv fn parse_javascript_w_scope(&self) -> @BsonElement {
     let string_size = self.reader.read_le_u32();
     let bytes = self.reader.read_bytes(string_size as uint);
     let document = self.parse_object();
-    ~JavascriptCodeWScope(from_bytes(bytes), document) 
+    @JavascriptCodeWScope(from_bytes(bytes), document) 
   }
 
   #[inline(always)]
-  priv fn parse_javascript(&self) -> ~BsonElement {
+  priv fn parse_javascript(&self) -> @BsonElement {
     let string_size = self.reader.read_le_u32();
     let bytes = self.reader.read_bytes(string_size as uint);
-    ~JavascriptCode(from_bytes(bytes))
+    @JavascriptCode(from_bytes(bytes))
   }
 
-  fn parse(&self) -> ~BsonElement {
+  fn parse(&self) -> @BsonElement {
     self.parse_object()
   }
 }
@@ -241,29 +231,53 @@ pub impl Decoder {
 
 #[test]
 fn deserialize_full_document() {
-  // var doc2 = {
+  // var motherOfAllDocuments = {
   //   'string': 'hello',
   //   'array': [1,2,3],
   //   'hash': {'a':1, 'b':2},
-  //   'date': date,
-  //   'oid': oid,
-  //   'binary': bin,
-  //   'int': 42,
-  //   'float': 33.3333,
+  //   'date': new Date(),
+  //   'oid': new ObjectID(),
+  //   'binary': new Binary(new Buffer("hello")),
   //   'regexp': /regexp/,
   //   'boolean': true,
-  //   'long': date.getTime(),
-  //   'where': new Code('this.a > i', {i:1}),
+  //   'long': Long.fromNumber(100),
+  //   'where': new Code('this.a > i', {i:1}),        
+  //   'dbref': new DBRef('namespace', new ObjectID(), 'integration_tests_'),
+  //   'minkey': new MinKey(),
+  //   'maxkey': new MaxKey()    
   // }
 
   let data = @[236,0,0,0,2,115,116,114,105,110,103,0,6,0,0,0,104,101,108,108,111,0,4,97,114,114,97,121,0,26,0,0,0,16,48,0,1,0,0,0,16,49,0,2,0,0,0,16,50,0,3,0,0,0,0,3,104,97,115,104,0,19,0,0,0,16,97,0,1,0,0,0,16,98,0,2,0,0,0,0,9,100,97,116,101,0,187,62,201,126,62,1,0,0,7,111,105,100,0,81,136,231,190,131,156,66,3,106,0,0,17,5,98,105,110,97,114,121,0,9,0,0,0,0,98,105,110,115,116,114,105,110,103,16,105,110,116,0,42,0,0,0,1,102,108,111,97,116,0,223,224,11,147,169,170,64,64,11,114,101,103,101,120,112,0,114,101,103,101,120,112,0,0,8,98,111,111,108,101,97,110,0,1,1,108,111,110,103,0,0,176,235,147,236,231,115,66,15,119,104,101,114,101,0,31,0,0,0,11,0,0,0,116,104,105,115,46,97,32,62,32,105,0,12,0,0,0,16,105,0,1,0,0,0,0,0];
   io::with_bytes_reader(data, |rd| {
     let decoder = Decoder::new(rd);  
     let obj = decoder.parse();
-    io::println(fmt!("%?", obj));
+    // io::println(fmt!("%?", obj));
+
+    match obj {
+      @Object(map) => {
+        match map.find(&~"string") {
+          Some(&@String(string)) => assert_eq!(string, @"hello"),
+          _ => fail!()
+        }
+
+        match map.find(&~"int") {
+          Some(&@Int32(number)) => assert_eq!(number, 42),
+          _ => fail!()
+        }
+
+        match map.find(&~"float") {
+          Some(&@Double(number)) => assert_eq!(number, 33.3333),
+          _ => fail!()
+        }
+
+        match map.find(&~"regexp") {
+          Some(&@RegExp(regexp, _)) => assert_eq!(regexp, @"regexp"),
+          _ => fail!()
+        }
+      },
+      _ => fail!()
+    }
   });
-  // let parser:BsonParser = BsonParser;
-  // let result = parser.deserialize();
 }
 
 
