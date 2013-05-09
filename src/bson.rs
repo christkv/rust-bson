@@ -44,17 +44,17 @@ enum BsonElement {
   Double(f64),
   String(@str),
   Object(@mut TreeMap<~str, @BsonElement>),
-  Array(~[@BsonElement]),  
-  Binary(~[u8], u8),
+  Array(@[@BsonElement]),  
+  Binary(@[u8], u8),
   Undefined,
   ObjectId(~[u8]),
   Boolean(bool),
   DateTime(u64),
   Null,
   RegExp(@str, @str),
-  JavascriptCode(~str),
-  Symbol(~str),
-  JavascriptCodeWScope(~str, @BsonElement),  
+  JavascriptCode(@str),
+  Symbol(@str),
+  JavascriptCodeWScope(@str, @BsonElement),  
   Int32(i32),
   Timestamp(u64),
   Int64(i64),  
@@ -94,7 +94,7 @@ pub impl Decoder {
       // Read the object type
       let bson_type:u8 = self.reader.read_u8();
       // If bson_type == 0 we are done
-      if bson_type == 0 || bson_type == 255 {
+      if bson_type == 0 {
         break;
       }
       
@@ -106,24 +106,8 @@ pub impl Decoder {
         0x01 => { map.insert(name, self.parse_double()); },
         0x02 => { map.insert(name, self.parse_string()); },
         0x03 => { map.insert(name, self.parse_object()); },
-        0x04 => { 
-          match self.parse_object() {
-            @Object(map) => { 
-              // Create a vector based on the results
-              let mut values = vec::from_elem(map.len(), @Null);
-              let mut index = 0;
-              // Map all tree values
-              for map.each_value |value| {
-                values[index] = *value;
-                index += 1;
-              }
-              // Insert the array
-              map.insert(name, @Array(values)); 
-            },
-            _ => ()
-          }
-        },
-        0x05 => {  map.insert(name, self.parse_binary()); },
+        0x04 => { map.insert(name, self.parse_array()); }, 
+        0x05 => { map.insert(name, self.parse_binary()); },
         0x06 => { map.insert(name, @Undefined); },
         0x07 => { map.insert(name, @ObjectId(self.reader.read_bytes(12))); },
         0x08 => { map.insert(name, self.parse_bool()); },
@@ -146,6 +130,23 @@ pub impl Decoder {
   }
 
   #[inline(always)]
+  priv fn parse_array(&self) -> @BsonElement {
+    let object = self.parse_object();
+    match object {
+      @Object(map) => {
+        let vector = do at_vec::build |push| {
+          for map.each_value |value| {
+            push(*value);
+          }
+        };
+
+        @Array(vector)
+      },
+      _ => fail!()
+    }
+  }
+
+  #[inline(always)]
   priv fn parse_double(&self) -> @BsonElement {
     // Read u64 value
     let u64_value = self.reader.read_le_u64();
@@ -163,7 +164,7 @@ pub impl Decoder {
     self.reader.read_u8();
     // Convert bytes
     let string = from_bytes(bytes);
-    // @String(from_bytes(bytes))
+    // Return the value
     @String(string.to_managed())
   }
 
@@ -171,7 +172,7 @@ pub impl Decoder {
   priv fn parse_binary(&self) -> @BsonElement {
     let binary_size = self.reader.read_le_u32();
     let sub_type = self.reader.read_u8();
-    let bytes = self.reader.read_bytes(binary_size as uint);
+    let bytes = at_vec::from_owned(self.reader.read_bytes(binary_size as uint));
     @Binary(bytes, sub_type)
   }
 
@@ -194,24 +195,37 @@ pub impl Decoder {
 
   #[inline(always)]
   priv fn parse_symbol(&self) -> @BsonElement {
-    let string_size = self.reader.read_le_u32();
+    let string_size = self.reader.read_le_u32() - 1;
     let bytes = self.reader.read_bytes(string_size as uint);
-    @Symbol(from_bytes(bytes))
+    // Skip zero
+    self.reader.read_u8();
+    // Convert bytes
+    @Symbol(from_bytes(bytes).to_managed())
   }
 
   #[inline(always)]
   priv fn parse_javascript_w_scope(&self) -> @BsonElement {
-    let string_size = self.reader.read_le_u32();
-    let bytes = self.reader.read_bytes(string_size as uint);
+    // Skip the first 4 bytes
+    self.reader.read_le_u32();
+    // Read string size
+    let string_size = self.reader.read_le_u32() - 1;
+    let bytes = self.reader.read_bytes(string_size as uint);    
+    // Skip zero
+    self.reader.read_u8();
+    // Parse the document
     let document = self.parse_object();
-    @JavascriptCodeWScope(from_bytes(bytes), document) 
+    // Convert bytes
+    @JavascriptCodeWScope(from_bytes(bytes).to_managed(), document) 
   }
 
   #[inline(always)]
   priv fn parse_javascript(&self) -> @BsonElement {
-    let string_size = self.reader.read_le_u32();
+    let string_size = self.reader.read_le_u32() - 1;
     let bytes = self.reader.read_bytes(string_size as uint);
-    @JavascriptCode(from_bytes(bytes))
+    // Skip zero
+    self.reader.read_u8();
+    // Convert bytes
+    @JavascriptCode(from_bytes(bytes).to_managed())
   }
 
   fn parse(&self) -> @BsonElement {
@@ -231,30 +245,88 @@ pub impl Decoder {
 
 #[test]
 fn deserialize_full_document() {
-  // var motherOfAllDocuments = {
-  //   'string': 'hello',
-  //   'array': [1,2,3],
-  //   'hash': {'a':1, 'b':2},
-  //   'date': new Date(),
-  //   'oid': new ObjectID(),
-  //   'binary': new Binary(new Buffer("hello")),
-  //   'regexp': /regexp/,
-  //   'boolean': true,
-  //   'long': Long.fromNumber(100),
-  //   'where': new Code('this.a > i', {i:1}),        
-  //   'dbref': new DBRef('namespace', new ObjectID(), 'integration_tests_'),
-  //   'minkey': new MinKey(),
-  //   'maxkey': new MaxKey()    
-  // }
-
-  let data = @[236,0,0,0,2,115,116,114,105,110,103,0,6,0,0,0,104,101,108,108,111,0,4,97,114,114,97,121,0,26,0,0,0,16,48,0,1,0,0,0,16,49,0,2,0,0,0,16,50,0,3,0,0,0,0,3,104,97,115,104,0,19,0,0,0,16,97,0,1,0,0,0,16,98,0,2,0,0,0,0,9,100,97,116,101,0,187,62,201,126,62,1,0,0,7,111,105,100,0,81,136,231,190,131,156,66,3,106,0,0,17,5,98,105,110,97,114,121,0,9,0,0,0,0,98,105,110,115,116,114,105,110,103,16,105,110,116,0,42,0,0,0,1,102,108,111,97,116,0,223,224,11,147,169,170,64,64,11,114,101,103,101,120,112,0,114,101,103,101,120,112,0,0,8,98,111,111,108,101,97,110,0,1,1,108,111,110,103,0,0,176,235,147,236,231,115,66,15,119,104,101,114,101,0,31,0,0,0,11,0,0,0,116,104,105,115,46,97,32,62,32,105,0,12,0,0,0,16,105,0,1,0,0,0,0,0];
+  let data = @[69,1,0,0,255,109,105,110,107,101,121,0,127,109,97,120,107,101,121,0,2,115,116,114,105,110,103,0,6,0,0,0,104,101,108,108,111,0,4,97,114,114,97,121,0,26,0,0,0,16,48,0,1,0,0,0,16,49,0,2,0,0,0,16,50,0,3,0,0,0,0,3,104,97,115,104,0,19,0,0,0,16,97,0,1,0,0,0,16,98,0,2,0,0,0,0,9,100,97,116,101,0,181,137,245,137,62,1,0,0,7,111,105,100,0,81,139,195,250,222,146,140,112,39,0,0,1,5,98,105,110,97,114,121,0,5,0,0,0,0,104,101,108,108,111,16,105,110,116,0,42,0,0,0,1,102,108,111,97,116,0,223,224,11,147,169,170,64,64,11,114,101,103,101,120,112,0,114,101,103,101,120,112,0,0,8,98,111,111,108,101,97,110,0,1,18,108,111,110,103,0,100,0,0,0,0,0,0,0,3,100,98,114,101,102,0,70,0,0,0,2,36,114,101,102,0,10,0,0,0,110,97,109,101,115,112,97,99,101,0,7,36,105,100,0,81,139,195,250,222,146,140,112,39,0,0,2,2,36,100,98,0,19,0,0,0,105,110,116,101,103,114,97,116,105,111,110,95,116,101,115,116,115,95,0,0,15,119,104,101,114,101,0,31,0,0,0,11,0,0,0,116,104,105,115,46,97,32,62,32,105,0,12,0,0,0,16,105,0,1,0,0,0,0,0];
   io::with_bytes_reader(data, |rd| {
     let decoder = Decoder::new(rd);  
     let obj = decoder.parse();
-    // io::println(fmt!("%?", obj));
 
     match obj {
       @Object(map) => {
+        match map.find(&~"maxkey") {
+          Some(&@MaxKey) => (),
+          _ => fail!()
+        }
+
+        match map.find(&~"minkey") {
+          Some(&@MinKey) => (),
+          _ => fail!()
+        }
+
+        match map.find(&~"long") {
+          Some(&@Int64(number)) => assert_eq!(number, 100 as i64),
+          _ => fail!()
+        }
+
+        match map.find(&~"boolean") {
+          Some(&@Boolean(value)) => assert_eq!(value, true),
+          _ => fail!()
+        }
+
+        match map.find(&~"binary") {
+          Some(&@Binary(data1, subtype1)) => {
+            // io::println(fmt!("%?", str::from_bytes(data1)));
+            assert_eq!(str::from_bytes(data1), ~"hello");
+            assert_eq!(subtype1, 0);
+            ()
+          },
+          _ => fail!()
+        }
+
+        match map.find(&~"oid") {
+          Some(&@ObjectId(_)) => (),
+          _ => fail!()
+        }
+
+        match map.find(&~"array") {
+          Some(&@Array(array)) => {
+            match array[0] {
+              @Int32(number) => assert_eq!(number, 1),
+              _ => fail!()
+            }
+
+            match array[1] {
+              @Int32(number) => assert_eq!(number, 2),
+              _ => fail!()
+            }
+
+            match array[2] {
+              @Int32(number) => assert_eq!(number, 3),
+              _ => fail!()
+            }
+          }
+          _ => fail!()
+        }
+
+        match map.find(&~"hash") {
+          Some(&@Object(map2)) => {
+            match map2.find(&~"a") {
+              Some(&@Int32(number)) => assert_eq!(number, 1),
+              _ => fail!()
+            }
+
+            match map2.find(&~"b") {
+              Some(&@Int32(number)) => assert_eq!(number, 2),
+              _ => fail!()
+            }
+          }
+          _ => fail!()
+        }
+
+        match map.find(&~"date") {
+          Some(&@DateTime(_)) => (),
+          _ => fail!()          
+        }
+
         match map.find(&~"string") {
           Some(&@String(string)) => assert_eq!(string, @"hello"),
           _ => fail!()
@@ -272,6 +344,23 @@ fn deserialize_full_document() {
 
         match map.find(&~"regexp") {
           Some(&@RegExp(regexp, _)) => assert_eq!(regexp, @"regexp"),
+          _ => fail!()
+        }
+
+        match map.find(&~"where") {
+          Some(&@JavascriptCodeWScope(code, document)) => {
+            match document {
+              @Object(map1) => {
+                match map1.find(&~"i") {
+                  Some(&@Int32(number)) => assert_eq!(number, 1),
+                  _ => fail!()                  
+                }
+              },
+              _ => fail!()
+            }
+
+            assert_eq!(code, @"this.a > i");
+          },
           _ => fail!()
         }
       },
