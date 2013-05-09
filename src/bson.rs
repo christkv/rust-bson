@@ -47,7 +47,7 @@ enum BsonElement {
   Array(@[@BsonElement]),  
   Binary(@[u8], u8),
   Undefined,
-  ObjectId(~[u8]),
+  ObjectId(@[u8]),
   Boolean(bool),
   DateTime(u64),
   Null,
@@ -109,7 +109,7 @@ pub impl Decoder {
         0x04 => { map.insert(name, self.parse_array()); }, 
         0x05 => { map.insert(name, self.parse_binary()); },
         0x06 => { map.insert(name, @Undefined); },
-        0x07 => { map.insert(name, @ObjectId(self.reader.read_bytes(12))); },
+        0x07 => { map.insert(name, @ObjectId(at_vec::from_owned(self.reader.read_bytes(12)))); },
         0x08 => { map.insert(name, self.parse_bool()); },
         0x09 => { map.insert(name, @DateTime(self.reader.read_le_u64())); },
         0x0a => { map.insert(name, @Null); },
@@ -283,7 +283,7 @@ fn deserialize_full_document() {
         }
 
         match map.find(&~"oid") {
-          Some(&@ObjectId(_)) => (),
+          Some(&@ObjectId(oid)) => assert_eq!(oid.len(), 12),
           _ => fail!()
         }
 
