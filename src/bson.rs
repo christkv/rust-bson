@@ -71,15 +71,13 @@ priv fn to_double(v:u64) -> f64 {unsafe { cast::transmute(v) }}
  * BSON Decoder
  */
 pub struct Decoder {
-  reader: @io::Reader,
-  next_byte: @mut Option<u8>
+  reader: @io::Reader
 }
 
 pub impl Decoder {
   fn new(reader: @io::Reader) -> Decoder {
     Decoder {
-      reader: reader,
-      next_byte: @mut None,
+      reader: reader
     }
   }
 
@@ -233,15 +231,408 @@ pub impl Decoder {
   }
 }
 
-// #[test]
-// fn parse_simple_int32() {
-//   let data = @[0x0c, 0x00, 0x00, 0x00, 0x10, 0x61, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00];
-//   io::with_bytes_reader(data, |rd| {
-//     let decoder = Decoder::new(rd);  
-//     let obj = decoder.parse();
-//     io::println(fmt!("%?", obj));
-//   });
-// }
+/*
+ * BSON Encoder
+ */
+pub struct Encoder {
+  writer: @io::Writer
+}
+
+pub impl Encoder {
+  fn new(writer: @io::Writer) -> Encoder {
+    Encoder {
+      writer: writer
+    }
+  }
+
+  fn encode(&self, object: &BsonElement) {
+    self.encodeObject(object);
+  }
+
+  #[inline(always)]
+  priv fn encodeObjectValue(&self, k:&str, object:&BsonElement) {
+    // Write the type data
+    self.writer.write_u8(BsonObject as u8);
+    // Write the field name
+    self.writer.write_str(k);
+    self.writer.write_u8(0x00);
+    // Encode the object
+    self.encodeObject(object);    
+  }
+
+  #[inline(always)]
+  priv fn encodeMaxKey(&self, k:&str) {
+    // Write the type data
+    self.writer.write_u8(BsonMaxKey as u8);
+    // Write the field name
+    self.writer.write_str(k);
+    self.writer.write_u8(0x00);
+  }
+
+  #[inline(always)]
+  priv fn encodeMinKey(&self, k:&str) {
+    // Write the type data
+    self.writer.write_u8(BsonMinKey as u8);
+    // Write the field name
+    self.writer.write_str(k);
+    self.writer.write_u8(0x00);
+  }
+
+  #[inline(always)]
+  priv fn encodeTimestamp(&self, k:&str, timestamp:u64) {
+    // Write the type data
+    self.writer.write_u8(BsonTimestamp as u8);
+    // Write the field name
+    self.writer.write_str(k);
+    self.writer.write_u8(0x00);
+    // Write the regexp
+    self.writer.write_le_u64(timestamp);    
+  }
+
+  #[inline(always)]
+  priv fn encodeSymbol(&self, k:&str, symbol:&str) {
+    // Write the type data
+    self.writer.write_u8(BsonSymbol as u8);
+    // Write the field name
+    self.writer.write_str(k);
+    self.writer.write_u8(0x00);
+    // Write the regexp
+    self.writer.write_le_u32(symbol.len() as u32 + 1);
+    self.writer.write_str(symbol);
+    self.writer.write_u8(0x00);
+  }
+
+  #[inline(always)]
+  priv fn encodeJavascript(&self, k:&str, code:&str) {
+    // Write the type data
+    self.writer.write_u8(BsonJavascriptCode as u8);
+    // Write the field name
+    self.writer.write_str(k);
+    self.writer.write_u8(0x00);
+    // Write the regexp
+    self.writer.write_le_u32(code.len() as u32 + 1);
+    self.writer.write_str(code);
+    self.writer.write_u8(0x00);
+  }
+
+  #[inline(always)]
+  priv fn encodeRegExp(&self, k:&str, regexp:&str, options:&str) {
+    // Write the type data
+    self.writer.write_u8(BsonRegexp as u8);
+    // Write the field name
+    self.writer.write_str(k);
+    self.writer.write_u8(0x00);
+    // Write the regexp
+    self.writer.write_str(regexp);
+    self.writer.write_u8(0x00);
+    self.writer.write_str(options);
+    self.writer.write_u8(0x00);
+  }
+
+  #[inline(always)]
+  priv fn encodeNull(&self, k:&str) {
+    // Write the type data
+    self.writer.write_u8(BsonNull as u8);
+    // Write the field name
+    self.writer.write_str(k);
+    self.writer.write_u8(0x00);
+  }  
+
+  #[inline(always)]
+  priv fn encodeDateTime(&self, k:&str, date_time:u64) {
+    // Write the type data
+    self.writer.write_u8(BsonDate as u8);
+    // Write the field name
+    self.writer.write_str(k);
+    self.writer.write_u8(0x00);
+    // Write the datetime
+    self.writer.write_le_u64(date_time);
+  }
+
+  #[inline(always)]
+  priv fn encodeBoolean(&self, k:&str, boolean:bool) {
+    // Write the type data
+    self.writer.write_u8(BsonBoolean as u8);
+    // Write the field name
+    self.writer.write_str(k);
+    self.writer.write_u8(0x00);
+    // Write the objectid
+    if boolean {
+      self.writer.write_u8(0x01);
+    } else {
+      self.writer.write_u8(0x00);                
+    }
+  }
+
+  #[inline(always)]
+  priv fn encodeObjectId(&self, k:&str, id:&[u8]) {
+    // Write the type data
+    self.writer.write_u8(BsonObjectId as u8);
+    // Write the field name
+    self.writer.write_str(k);
+    self.writer.write_u8(0x00);
+    // Write the objectid
+    self.writer.write(id);
+  }
+
+  #[inline(always)]
+  priv fn encodeUndefined(&self, k:&str) {
+    // Write the type data
+    self.writer.write_u8(BsonUndefined as u8);
+    // Write the field name
+    self.writer.write_str(k);
+    self.writer.write_u8(0x00);
+  }
+
+  #[inline(always)]
+  priv fn encodeBinary(&self, k:&str, data:&[u8], sub_type:u8) {
+    // Write the type data
+    self.writer.write_u8(BsonBinary as u8);
+    // Write the field name
+    self.writer.write_str(k);
+    self.writer.write_u8(0x00);
+    // Write the field name
+    self.writer.write_le_u32(data.len() as u32);
+    self.writer.write_u8(sub_type);              
+    self.writer.write(data);
+  }
+
+  #[inline(always)]
+  priv fn encodeString(&self, k:&str, string:&str) {
+    // Write the type data
+    self.writer.write_u8(BsonString as u8);
+    // Write the field name
+    self.writer.write_str(k);
+    self.writer.write_u8(0x00);
+    // Write the field name
+    self.writer.write_le_u32(string.len() as u32 + 1);
+    self.writer.write_str(string);
+    self.writer.write_u8(0x00);
+  }
+
+  #[inline(always)]
+  priv fn encodeDouble(&self, k:&str, number:f64) {
+    // Write the type data
+    self.writer.write_u8(BsonDouble as u8);
+    // Write the field name
+    self.writer.write_str(k);
+    self.writer.write_u8(0x00);
+    // Write the value out
+    self.writer.write_le_f64(number);
+  } 
+
+  #[inline(always)]
+  priv fn encodeInt32(&self, k:&str, number:i32) {
+    // Write the type data
+    self.writer.write_u8(BsonInt32 as u8);
+    // Write the field name
+    self.writer.write_str(k);
+    self.writer.write_u8(0x00);
+    // Write the value out
+    self.writer.write_le_i32(number);
+  }
+
+  #[inline(always)]
+  priv fn encodeInt64(&self, k:&str, number:i64) {
+    // Write the type data
+    self.writer.write_u8(BsonInt64 as u8);
+    // Write the field name
+    self.writer.write_str(k);
+    self.writer.write_u8(0x00);
+    // Write the value out
+    self.writer.write_le_i64(number);
+  }
+
+  #[inline(always)]
+  priv fn encodeJavascriptWScope(&self, k:&str, code:&str, object:&BsonElement) {
+    // Write the type data
+    self.writer.write_u8(BsonJavascriptCodeWScope as u8);
+    // Write the field name
+    self.writer.write_str(k);
+    self.writer.write_u8(0x00);
+    // Save start position
+    let startPosition = self.writer.tell();
+    // Write place holder for the size
+    self.writer.write_le_u32(0u32);
+    // Let's write the code out
+    self.writer.write_le_u32(code.len() as u32 + 1);
+    self.writer.write_str(code);
+    self.writer.write_u8(0x00);
+    // Write the document
+    self.encodeObject(object);
+    // Save current position
+    let endPosition = self.writer.tell();
+    // Seek an write the data
+    self.writer.seek(startPosition as int, io::SeekSet);
+    // Write the size
+    self.writer.write_le_u32((endPosition - startPosition + 1) as u32);
+    // Return to write position
+    self.writer.seek(endPosition as int, io::SeekSet);
+  }
+
+  #[inline(always)]
+  priv fn encodeArray(&self, k:&str, array:&[@BsonElement]) {
+    // Write the type data
+    self.writer.write_u8(BsonArray as u8);
+    // Write the field name
+    self.writer.write_str(k);
+    self.writer.write_u8(0x00);
+    // Save start position
+    let startPosition = self.writer.tell();
+    // Write place holder for the size
+    self.writer.write_le_u32(0u32);
+    // The mutable
+    let mut index = 0;
+    // Let's iterate over all the array values
+    array.each(|&value| {
+      let k = int::to_str(index);
+      index = index + 1;
+      // Match on the value to serialize
+      match value {
+        @Array(array) => self.encodeArray(k, array),
+        @Object(_) => self.encodeObjectValue(k, value),
+        @MaxKey => self.encodeMaxKey(k),
+        @MinKey => self.encodeMinKey(k),
+        @Timestamp(timestamp) => self.encodeTimestamp(k, timestamp),
+        @Symbol(symbol) =>  self.encodeSymbol(k, symbol),
+        @JavascriptCode(code) => self.encodeJavascript(k, code),
+        @RegExp(regexp, options) => self.encodeRegExp(k, regexp, options),
+        @Null => self.encodeNull(k),
+        @DateTime(date_time) => self.encodeDateTime(k, date_time),
+        @Boolean(boolean) => self.encodeBoolean(k, boolean),
+        @ObjectId(id) => self.encodeObjectId(k, id),
+        @Undefined => self.encodeUndefined(k),
+        @Binary(data, sub_type) => self.encodeBinary(k, data, sub_type),
+        @String(string) => self.encodeString(k, string),
+        @Double(number) => self.encodeDouble(k, number), 
+        @Int32(number) => self.encodeInt32(k, number), 
+        @Int64(number) => self.encodeInt64(k, number),
+        _ => ()
+      }
+
+      true
+    });
+
+    // Save current position
+    let endPosition = self.writer.tell();
+    // Seek an write the data
+    self.writer.seek(startPosition as int, io::SeekSet);
+    // Write the size
+    self.writer.write_le_u32((endPosition - startPosition + 1) as u32);
+    // Return to write position
+    self.writer.seek(endPosition as int, io::SeekSet);
+    // Write terminating null for the object
+    self.writer.write_u8(0x00);
+  }
+
+  #[inline(always)]
+  priv fn encodeObject(&self, object:&BsonElement) {
+    // Unpack the object
+    match object {
+      &Object(map) => {
+        let startPosition = self.writer.tell();
+        // Write place holder for the size
+        self.writer.write_le_u32(0u32);
+        // Iterate over all the fields
+        for map.each_key |k| {
+          // Get the value
+          let value = map.find(k);
+          // Match on the value
+          match value {
+            Some(&@Array(array)) => self.encodeArray(*k, array),
+            Some(&@Object(_)) => {
+              match value {
+                Some(&object) => self.encodeObjectValue(*k, object),
+                _ => ()
+              }
+            },
+            Some(&@MaxKey) => self.encodeMaxKey(*k),
+            Some(&@MinKey) => self.encodeMinKey(*k),
+            Some(&@Timestamp(timestamp)) => self.encodeTimestamp(*k, timestamp),
+            Some(&@Symbol(symbol)) =>  self.encodeSymbol(*k, symbol),
+            Some(&@JavascriptCode(code)) => self.encodeJavascript(*k, code),
+            Some(&@RegExp(regexp, options)) => self.encodeRegExp(*k, regexp, options),
+            Some(&@Null) => self.encodeNull(*k),
+            Some(&@DateTime(date_time)) => self.encodeDateTime(*k, date_time),
+            Some(&@Boolean(boolean)) => self.encodeBoolean(*k, boolean),
+            Some(&@ObjectId(id)) => self.encodeObjectId(*k, id),
+            Some(&@Undefined) => self.encodeUndefined(*k),
+            Some(&@Binary(data, sub_type)) => self.encodeBinary(*k, data, sub_type),
+            Some(&@String(string)) => self.encodeString(*k, string),
+            Some(&@Double(number)) => self.encodeDouble(*k, number), 
+            Some(&@Int32(number)) => self.encodeInt32(*k, number), 
+            Some(&@Int64(number)) => self.encodeInt64(*k, number),
+            Some(&@JavascriptCodeWScope(code, doc)) => self.encodeJavascriptWScope(*k, code, doc),
+            _ => ()
+          }
+        };
+
+        // Save current position
+        let endPosition = self.writer.tell();
+        // Seek an write the data
+        self.writer.seek(startPosition as int, io::SeekSet);
+        // Write the size
+        self.writer.write_le_u32((endPosition - startPosition + 1) as u32);
+        // Return to write position
+        self.writer.seek(endPosition as int, io::SeekSet);
+        // Write terminating null for the object
+        self.writer.write_u8(0x00);
+      },
+      _ => ()
+    }
+  }
+}
+
+#[test]
+fn serialize_full_document() {
+  let data = io::with_bytes_writer(|wd| {
+    // Create a simple object to encode
+    let map = @mut TreeMap::new::<~str, @BsonElement>();
+    map.insert(~"1", @Double(33.3333));
+    map.insert(~"2", @String(@"Hello world"));
+
+    // Insert additional object
+    let map2 = @mut TreeMap::new::<~str, @BsonElement>();
+    map2.insert(~"a", @String(@"Embedded string"));
+    map.insert(~"3", @Object(map2));
+
+    // Insert array
+    map.insert(~"4", @Array(@[@String(@"Hello world"), @Int32(200)]));
+
+    // Add basic types    
+    map.insert(~"5", @Binary(@[1, 1, 1, 1], 0));
+    // map.insert(~"6", @Undefined);
+    map.insert(~"7", @ObjectId(@[2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2]));
+    map.insert(~"8", @Boolean(true));
+    map.insert(~"9", @DateTime(32233u64));
+    map.insert(~"10", @Null);
+    map.insert(~"11", @RegExp(@"regexp", @""));
+    map.insert(~"12", @JavascriptCode(@"function() {}"));
+    map.insert(~"13", @Symbol(@"symbol"));
+
+    // Create Javascript with scope
+    let map3 = @mut TreeMap::new::<~str, @BsonElement>();
+    map3.insert(~"a", @Int32(1));
+    map.insert(~"14", @JavascriptCodeWScope(@"function() {}", @Object(map3)));
+
+    // // map.insert(~"14", @Symbol(@"symbol"));
+    map.insert(~"15", @Int32(100));
+    map.insert(~"16", @Timestamp(100000u64));
+    map.insert(~"17", @Int64(22222i64));
+    map.insert(~"18", @MinKey);
+    map.insert(~"19", @MaxKey);
+
+    // Create encoder instance
+    let encoder = Encoder::new(wd);
+    // Encode the data
+    encoder.encode(@Object(map));
+  });
+
+  // Expected serialization bytes
+  let expected_data = ~[17, 1, 0, 0, 1, 49, 0, 223, 224, 11, 147, 169, 170, 64, 64, 10, 49, 48, 0, 11, 49, 49, 0, 114, 101, 103, 101, 120, 112, 0, 0, 13, 49, 50, 0, 14, 0, 0, 0, 102, 117, 110, 99, 116, 105, 111, 110, 40, 41, 32, 123, 125, 0, 14, 49, 51, 0, 7, 0, 0, 0, 115, 121, 109, 98, 111, 108, 0, 15, 49, 52, 0, 35, 0, 0, 0, 14, 0, 0, 0, 102, 117, 110, 99, 116, 105, 111, 110, 40, 41, 32, 123, 125, 0, 12, 0, 0, 0, 16, 97, 0, 1, 0, 0, 0, 0, 16, 49, 53, 0, 100, 0, 0, 0, 17, 49, 54, 0, 160, 134, 1, 0, 0, 0, 0, 0, 18, 49, 55, 0, 206, 86, 0, 0, 0, 0, 0, 0, 255, 49, 56, 0, 127, 49, 57, 0, 2, 50, 0, 12, 0, 0, 0, 72, 101, 108, 108, 111, 32, 119, 111, 114, 108, 100, 0, 3, 51, 0, 28, 0, 0, 0, 2, 97, 0, 16, 0, 0, 0, 69, 109, 98, 101, 100, 100, 101, 100, 32, 115, 116, 114, 105, 110, 103, 0, 0, 4, 52, 0, 31, 0, 0, 0, 2, 48, 0, 12, 0, 0, 0, 72, 101, 108, 108, 111, 32, 119, 111, 114, 108, 100, 0, 16, 49, 0, 200, 0, 0, 0, 0, 5, 53, 0, 4, 0, 0, 0, 0, 1, 1, 1, 1, 7, 55, 0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 8, 56, 0, 1, 9, 57, 0, 233, 125, 0, 0, 0, 0, 0, 0, 0];
+  // Assert correctness
+  assert_eq!(data, expected_data);
+}
 
 #[test]
 fn deserialize_full_document() {
@@ -368,147 +759,3 @@ fn deserialize_full_document() {
     }
   });
 }
-
-
-
-// struct BsonParser;
-
-// impl BsonParser {
-//   fn serialize_object(&self, object: &BsonElement, data: &mut [u8], index: &mut uint) {
-//     // Unpack the object
-//     match object {
-//       &Object(map) => {
-//         // Get each key
-//         for map.each_key |k| {
-//           // Let's figure out what type of object we have
-//           match map.find(k) {
-//             Some(&~Int32(number)) => {
-//               // Set the data type
-//               data[*index] = BsonInt32 as u8;
-//               // Adjust index
-//               *index += 1;
-
-//               // Copy the field value name to the vector
-//               copy_memory(vec::mut_slice(data, *index, *index + k.len()), k.to_bytes(), k.len());
-
-//               // Adjust the index position
-//               *index += k.len() + 1;
-
-//               // Write the int32 value to the data
-//               data[*index + 3] = ((number >> 24) & 0xff) as u8;
-//               data[*index + 2] = ((number >> 16) & 0xff) as u8;
-//               data[*index + 1] = ((number >> 8) & 0xff) as u8;
-//               data[*index] = (number & 0xff) as u8;
-//               *index += 4;
-//             },
-//             Some(&~Int64(number)) => {
-//               // Set the data type
-//               data[*index] = BsonInt64 as u8;
-//               // Adjust index
-//               *index += 1;
-
-//               // Copy the field value name to the vector
-//               copy_memory(vec::mut_slice(data, *index, *index + k.len()), k.to_bytes(), k.len());
-
-//               // Adjust the index position
-//               *index += k.len() + 1;
-
-//               // Save the int64 number
-//               data[*index + 7] = ((number >> 56) & 0xff) as u8;
-//               data[*index + 6] = ((number >> 48) & 0xff) as u8;
-//               data[*index + 5] = ((number >> 40) & 0xff) as u8;
-//               data[*index + 4] = ((number >> 32) & 0xff) as u8;
-//               data[*index + 3] = ((number >> 24) & 0xff) as u8;
-//               data[*index + 2] = ((number >> 16) & 0xff) as u8;
-//               data[*index + 1] = ((number >> 8) & 0xff) as u8;
-//               data[*index] = (number & 0xff) as u8;
-//               *index += 8;
-//             },
-//             Some(&~Object(map)) => {
-//               // Set type
-//               data[*index] = BsonObject as u8;
-//               // Skip type
-//               *index += 1;
-//               // Copy the field value name to the vector
-//               copy_memory(vec::mut_slice(data, *index, *index + k.len()), k.to_bytes(), k.len());
-
-//               // Adjust the index position
-//               *index += k.len() + 1;
-
-//               // Save position for size calculation
-//               let starting_index = *index;
-//               // Skip to start of doc
-//               *index += 4;
-
-//               // Serialize the object
-//               self.serialize_object(~Object(map), data, index);
-
-//               // Calculate size
-//               let size = *index - starting_index + 1;
-//               // Write the size of the document
-//               data[starting_index + 3] = ((size >> 24) & 0xff) as u8;
-//               data[starting_index + 2] = ((size >> 16) & 0xff) as u8;
-//               data[starting_index + 1] = ((size >> 8) & 0xff) as u8;
-//               data[starting_index] = (size & 0xff) as u8;
-//               // Adjust past the last 0
-//               if *index < data.len() {                
-//                 *index += 1;
-//               }
-//             }
-//             _ => ()
-//           }
-//         }
-//       }
-//       _ => ()
-//     }
-//   }
-
-//   fn serialize(&self, object: &BsonElement) -> ~[u8] {
-//     // Calculate size of final object
-//     let size = BsonParser::calculateSize(object);
-    
-//     // Allocate a vector
-//     let mut data = vec::from_elem(size, 0);
-
-//     // Write the data to the vector
-//     data[3] = ((size >> 24) & 0xff) as u8;
-//     data[2] = ((size >> 16) & 0xff) as u8;
-//     data[1] = ((size >> 8) & 0xff) as u8;
-//     data[0] = (size & 0xff) as u8;
-
-//     // Starting index
-//     let mut index = @mut 4;
-
-//     // Serialize the object
-//     self.serialize_object(object, data, index);
-
-//     // data
-//     data
-//   }
-
-//   fn calculateSize(object: &BsonElement) -> uint {
-//     let mut size:uint = 0;
-
-//     // Unpack the object
-//     match object {
-//       &Object(map) => {
-//         // Add the header and tail of the document
-//         size += 5;
-//         // Iterate over all the fields
-//         for map.each_key |k| {
-//           // String length + 0 terminating byte + type
-//           size += k.len() as uint + 1 + 1;
-//           // Match the key
-//           size += match map.find(k) {
-//             Some(&~Int32(_)) => 4,
-//             Some(&~Object(map)) => BsonParser::calculateSize(~Object(map)),
-//             Some(&~Int64(_)) => 8,
-//             _ => 0
-//           };
-//         };
-//       },
-//       _ => ()
-//     }
-
-//     size
-//   }
