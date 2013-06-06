@@ -2,13 +2,15 @@
        vers = "0.1",
        uuid = "812ef35d-c3f5-4d94-9199-a2346bfa346e")];
 #[crate_type = "lib"];
+extern mod extra;
 extern mod std;
 
-use core::str::from_bytes;
-use std::treemap::TreeMap;
+use std::*;
+use std::str::from_bytes;
+use extra::treemap::TreeMap;
 // use
 
-use core::io::{WriterUtil,ReaderUtil};
+use std::io::{WriterUtil,ReaderUtil};
 
 // Available Result values
 enum Result {
@@ -107,7 +109,7 @@ pub impl Decoder {
         0x04 => { map.insert(name, self.parse_array()); }, 
         0x05 => { map.insert(name, self.parse_binary()); },
         0x06 => { map.insert(name, @Undefined); },
-        0x07 => { map.insert(name, @ObjectId(at_vec::from_owned(self.reader.read_bytes(12)))); },
+        0x07 => { map.insert(name, @ObjectId(at_vec::to_managed(self.reader.read_bytes(12)))); },
         0x08 => { map.insert(name, self.parse_bool()); },
         0x09 => { map.insert(name, @DateTime(self.reader.read_le_u64())); },
         0x0a => { map.insert(name, @Null); },
@@ -170,7 +172,7 @@ pub impl Decoder {
   priv fn parse_binary(&self) -> @BsonElement {
     let binary_size = self.reader.read_le_u32();
     let sub_type = self.reader.read_u8();
-    let bytes = at_vec::from_owned(self.reader.read_bytes(binary_size as uint));
+    let bytes = at_vec::to_managed(self.reader.read_bytes(binary_size as uint));
     @Binary(bytes, sub_type)
   }
 
